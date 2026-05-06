@@ -18,7 +18,7 @@ export function PostCard({ post, commentsHidden, onToggleCommentsHidden }: Props
     !longBody || bodyExpanded ? post.body : post.body.slice(0, BODY_TRUNCATE).trimEnd() + '…';
 
   return (
-    <article className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-lg sm:p-5">
+    <article className="animate-fadein rounded-xl border border-neutral-800 bg-neutral-900 p-4 shadow-lg sm:p-5">
       <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
         <span>r/[hidden]</span>
         <span>•</span>

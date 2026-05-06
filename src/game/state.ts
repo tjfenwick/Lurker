@@ -12,6 +12,8 @@ export interface GameState {
   lastChoiceIndex: number | null;
   stats: GameStats;
   recentlyUsedIds: string[];
+  // Most-recent-first ring of round outcomes for the share grid (capped at 10).
+  recentResults: ('correct' | 'wrong')[];
 }
 
 export type GameAction =
@@ -22,6 +24,7 @@ export type GameAction =
   | { type: 'RESET_STATS' };
 
 const RECENT_IDS_LIMIT = 30;
+const RECENT_RESULTS_LIMIT = 10;
 
 export function initialState(): GameState {
   return {
@@ -32,6 +35,7 @@ export function initialState(): GameState {
     lastChoiceIndex: null,
     stats: defaultStats(),
     recentlyUsedIds: [],
+    recentResults: [],
   };
 }
 
@@ -55,6 +59,7 @@ export function reducer(state: GameState, action: GameAction): GameState {
         lastResult: null,
         lastChoiceIndex: null,
         recentlyUsedIds: rememberId(state.recentlyUsedIds, round.post.id),
+        recentResults: [],
       };
     }
     case 'ANSWER': {
@@ -77,12 +82,14 @@ export function reducer(state: GameState, action: GameAction): GameState {
         },
       };
       saveStats(stats);
+      const result: 'correct' | 'wrong' = correct ? 'correct' : 'wrong';
       return {
         ...state,
         status: 'answered',
-        lastResult: correct ? 'correct' : 'wrong',
+        lastResult: result,
         lastChoiceIndex: action.choiceIndex,
         stats,
+        recentResults: [result, ...state.recentResults].slice(0, RECENT_RESULTS_LIMIT),
       };
     }
     case 'NEXT_ROUND': {
@@ -109,7 +116,7 @@ export function reducer(state: GameState, action: GameAction): GameState {
     case 'RESET_STATS': {
       const stats = defaultStats();
       saveStats(stats);
-      return { ...state, stats };
+      return { ...state, stats, recentResults: [] };
     }
     default:
       return state;

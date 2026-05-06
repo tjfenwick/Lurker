@@ -176,4 +176,41 @@ describe('game reducer — 10-round smoke test', () => {
     const after = reducer(state, { type: 'NEXT_ROUND', posts: corpus });
     expect(after).toBe(before);
   });
+
+  it('records last 10 round results most-recent-first, capped at 10', () => {
+    let state = initialState();
+    state = reducer(state, { type: 'START_GAME', difficulty: 'easy', posts: corpus });
+    expect(state.recentResults).toEqual([]);
+
+    // 12 rounds: alternating correct/wrong patterns
+    const expectedReverse: ('correct' | 'wrong')[] = [];
+    for (let i = 0; i < 12; i++) {
+      const correctPick = i % 3 !== 0; // 8 correct, 4 wrong
+      const idx = correctPick
+        ? state.round!.correctIndex
+        : (state.round!.correctIndex + 1) % 4;
+      state = reducer(state, { type: 'ANSWER', choiceIndex: idx });
+      expectedReverse.push(correctPick ? 'correct' : 'wrong');
+      if (i < 11) state = reducer(state, { type: 'NEXT_ROUND', posts: corpus });
+    }
+    expect(state.recentResults).toHaveLength(10);
+    // Most-recent-first: last 10 of expectedReverse, reversed
+    expect(state.recentResults).toEqual(expectedReverse.slice(-10).reverse());
+  });
+
+  it('clears recentResults on START_GAME and RESET_STATS', () => {
+    let state = initialState();
+    state = reducer(state, { type: 'START_GAME', difficulty: 'easy', posts: corpus });
+    state = reducer(state, { type: 'ANSWER', choiceIndex: state.round!.correctIndex });
+    expect(state.recentResults).toEqual(['correct']);
+
+    state = reducer(state, { type: 'START_GAME', difficulty: 'easy', posts: corpus });
+    expect(state.recentResults).toEqual([]);
+
+    state = reducer(state, { type: 'ANSWER', choiceIndex: state.round!.correctIndex });
+    expect(state.recentResults).toEqual(['correct']);
+
+    state = reducer(state, { type: 'RESET_STATS' });
+    expect(state.recentResults).toEqual([]);
+  });
 });

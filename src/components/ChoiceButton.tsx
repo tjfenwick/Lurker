@@ -13,8 +13,8 @@ export function ChoiceButton({ choice, state, index, onClick }: Props) {
   const styleByState: Record<ChoiceState, string> = {
     idle:
       'border-neutral-700 bg-neutral-900 text-neutral-100 hover:border-neutral-600 hover:bg-neutral-800',
-    correct: 'border-emerald-500/70 bg-emerald-600/20 text-emerald-100',
-    wrong: 'border-red-500/70 bg-red-600/20 text-red-100',
+    correct: 'border-emerald-500/70 bg-emerald-600/20 text-emerald-100 animate-bump',
+    wrong: 'border-red-500/70 bg-red-600/20 text-red-100 animate-shake',
     disabled: 'cursor-not-allowed border-neutral-800 bg-neutral-900/50 text-neutral-500',
   };
   return (

@@ -4,6 +4,7 @@ import { DifficultyToggle } from './components/DifficultyToggle';
 import { PostCard } from './components/PostCard';
 import { ResultPanel } from './components/ResultPanel';
 import { StatsBar } from './components/StatsBar';
+import { StatsModal } from './components/StatsModal';
 import { loadInitialState, reducer } from './game/state';
 import type { Difficulty, Post, PostsFile } from './types';
 
@@ -39,6 +40,7 @@ export default function App() {
   const [commentsHidden, setCommentsHidden] = useState<boolean>(() =>
     readSessionFlag(COMMENTS_HIDDEN_KEY),
   );
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const loadPosts = useCallback(() => {
     setPostsLoad({ status: 'loading' });
@@ -66,9 +68,10 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // ignore if typing in an input
+      // ignore if typing in an input or if a modal owns the keyboard
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (statsOpen) return;
 
       if (e.key === 'c' || e.key === 'C') {
         toggleComments();
@@ -89,7 +92,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [state.status, state.round, postsLoad, toggleComments]);
+  }, [state.status, state.round, postsLoad, toggleComments, statsOpen]);
 
   return (
     <div className="mx-auto min-h-screen w-full max-w-2xl px-4 pb-8 pt-3 sm:pt-6">
@@ -97,8 +100,21 @@ export default function App() {
         <StatsBar
           stats={state.stats}
           onBackToStart={() => dispatch({ type: 'BACK_TO_IDLE' })}
+          onOpenStats={() => setStatsOpen(true)}
         />
       )}
+
+      <StatsModal
+        open={statsOpen}
+        stats={state.stats}
+        recentResults={state.recentResults}
+        difficulty={state.difficulty}
+        onClose={() => setStatsOpen(false)}
+        onResetStats={() => {
+          dispatch({ type: 'RESET_STATS' });
+          setStatsOpen(false);
+        }}
+      />
 
       {postsLoad.status === 'loading' && <LoadingScreen />}
       {postsLoad.status === 'error' && (
@@ -116,7 +132,7 @@ export default function App() {
               posts: postsLoad.posts,
             })
           }
-          onResetStats={() => dispatch({ type: 'RESET_STATS' })}
+          onOpenStats={() => setStatsOpen(true)}
         />
       )}
       {postsLoad.status === 'ready' && state.status !== 'idle' && state.round && (
@@ -165,7 +181,7 @@ interface StartScreenProps {
   difficulty: Difficulty;
   onDifficultyChange: (d: Difficulty) => void;
   onStart: () => void;
-  onResetStats: () => void;
+  onOpenStats: () => void;
 }
 
 function StartScreen({
@@ -173,7 +189,7 @@ function StartScreen({
   difficulty,
   onDifficultyChange,
   onStart,
-  onResetStats,
+  onOpenStats,
 }: StartScreenProps) {
   return (
     <div className="mt-6 sm:mt-12">
@@ -206,10 +222,10 @@ function StartScreen({
             <Stat label="best" value={String(stats.bestStreak)} />
           </div>
           <button
-            onClick={onResetStats}
-            className="mt-4 text-xs text-neutral-500 hover:text-neutral-300"
+            onClick={onOpenStats}
+            className="mt-4 text-xs text-neutral-400 underline-offset-4 hover:text-neutral-200 hover:underline"
           >
-            Reset stats
+            View detailed stats →
           </button>
         </div>
       )}
@@ -250,6 +266,7 @@ function RoundView({
   return (
     <div className="space-y-4">
       <PostCard
+        key={round.post.id}
         post={round.post}
         commentsHidden={commentsHidden}
         onToggleCommentsHidden={onToggleComments}

@@ -1,0 +1,20 @@
+{
+  "name": "Lurker",
+  "short_name": "Lurker",
+  "description": "Read a scrubbed Reddit post and guess the subreddit. Multiple choice.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0a0a0a",
+  "background_color": "#0a0a0a",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
