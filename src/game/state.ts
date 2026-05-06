@@ -9,6 +9,7 @@ export interface GameState {
   difficulty: Difficulty | null;
   round: Round | null;
   lastResult: 'correct' | 'wrong' | null;
+  lastChoiceIndex: number | null;
   stats: GameStats;
   recentlyUsedIds: string[];
 }
@@ -28,6 +29,7 @@ export function initialState(): GameState {
     difficulty: null,
     round: null,
     lastResult: null,
+    lastChoiceIndex: null,
     stats: defaultStats(),
     recentlyUsedIds: [],
   };
@@ -51,6 +53,7 @@ export function reducer(state: GameState, action: GameAction): GameState {
         difficulty: action.difficulty,
         round,
         lastResult: null,
+        lastChoiceIndex: null,
         recentlyUsedIds: rememberId(state.recentlyUsedIds, round.post.id),
       };
     }
@@ -78,22 +81,30 @@ export function reducer(state: GameState, action: GameAction): GameState {
         ...state,
         status: 'answered',
         lastResult: correct ? 'correct' : 'wrong',
+        lastChoiceIndex: action.choiceIndex,
         stats,
       };
     }
     case 'NEXT_ROUND': {
-      if (!state.difficulty) return state;
+      if (state.status !== 'answered' || !state.difficulty) return state;
       const round = pickRound(action.posts, state.difficulty, state.recentlyUsedIds);
       return {
         ...state,
         status: 'playing',
         round,
         lastResult: null,
+        lastChoiceIndex: null,
         recentlyUsedIds: rememberId(state.recentlyUsedIds, round.post.id),
       };
     }
     case 'BACK_TO_IDLE': {
-      return { ...state, status: 'idle', round: null, lastResult: null };
+      return {
+        ...state,
+        status: 'idle',
+        round: null,
+        lastResult: null,
+        lastChoiceIndex: null,
+      };
     }
     case 'RESET_STATS': {
       const stats = defaultStats();

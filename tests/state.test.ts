@@ -167,4 +167,13 @@ describe('game reducer — 10-round smoke test', () => {
     const after = reducer(state, { type: 'ANSWER', choiceIndex: 0 });
     expect(after).toBe(state);
   });
+
+  it('NEXT_ROUND is a no-op when not in "answered" status (prevents double-advance)', () => {
+    let state = initialState();
+    state = reducer(state, { type: 'START_GAME', difficulty: 'easy', posts: corpus });
+    expect(state.status).toBe('playing');
+    const before = state;
+    const after = reducer(state, { type: 'NEXT_ROUND', posts: corpus });
+    expect(after).toBe(before);
+  });
 });
