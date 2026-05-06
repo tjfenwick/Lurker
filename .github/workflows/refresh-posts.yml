@@ -1,0 +1,49 @@
+name: Refresh posts.json
+
+on:
+  schedule:
+    # Sundays at 03:00 UTC. Adjust if you want a different cadence.
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Pull fresh corpus from Reddit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch + scrub posts
+        run: npm run fetch
+        env:
+          # Reddit asks for a real contact in your User-Agent. Edit
+          # scripts/fetch.ts USER_AGENT to include your reddit username.
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Open pull request if corpus changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore: weekly posts.json refresh'
+          title: 'Weekly posts.json refresh'
+          body: |
+            Automated refresh of `public/posts.json` from the Reddit
+            top-of-year listings for every sub in `scripts/subreddits.ts`.
+
+            Scrubbed via `scripts/scrub.ts` — review the diff for any
+            obvious tells before merging.
+          branch: refresh/posts-${{ github.run_number }}
+          delete-branch: true
+          add-paths: public/posts.json
