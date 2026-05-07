@@ -62,6 +62,36 @@ export const SUBREDDITS: SubredditMeta[] = [
     category: 'work',
     description: 'Workplace grievances and anti-capitalism.',
   },
+  {
+    name: 'PublicFreakout',
+    difficulty: 'easy',
+    category: 'viral',
+    description: 'Videos of public meltdowns and altercations.',
+  },
+  {
+    name: 'chess',
+    difficulty: 'easy',
+    category: 'hobby',
+    description: 'Games, puzzles, openings, and chess news.',
+  },
+  {
+    name: 'Formula1',
+    difficulty: 'easy',
+    category: 'motorsport',
+    description: 'Formula 1 racing news, race threads, and analysis.',
+  },
+  {
+    name: 'pcmasterrace',
+    difficulty: 'easy',
+    category: 'hobby',
+    description: 'PC gaming and PC-building enthusiasts.',
+  },
+  {
+    name: 'medizzy',
+    difficulty: 'easy',
+    category: 'medical',
+    description: 'Medical photos and case-study videos for the curious.',
+  },
 
   // ─── MEDIUM (recognizable but easier to confuse) ───
   {
@@ -130,6 +160,54 @@ export const SUBREDDITS: SubredditMeta[] = [
     category: 'stories',
     description: 'Stories about difficult mothers-in-law.',
   },
+  {
+    name: '3Dprinting',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'Sharing 3D-printed projects, troubleshooting, and gear.',
+  },
+  {
+    name: 'bicycling',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'Cycling enthusiasts: gear, routes, and ride reports.',
+  },
+  {
+    name: 'audiophile',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'High-end audio equipment, headphones, and listening setups.',
+  },
+  {
+    name: 'DIY',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'Home improvement and personal craft projects.',
+  },
+  {
+    name: 'homegym',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'Home gym setups, equipment, and lifting.',
+  },
+  {
+    name: 'reptime',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'Replica watches: reviews, comparisons, and dealer talk.',
+  },
+  {
+    name: 'malelivingspace',
+    difficulty: 'medium',
+    category: 'hobby',
+    description: 'Apartments and rooms decorated by men, mostly photos.',
+  },
+  {
+    name: 'conspiracy',
+    difficulty: 'medium',
+    category: 'discussion',
+    description: 'Conspiracy theories and skepticism of mainstream narratives.',
+  },
 
   // ─── HARD (overlap heavily with each other) ───
   {
@@ -191,5 +269,17 @@ export const SUBREDDITS: SubredditMeta[] = [
     difficulty: 'hard',
     category: 'work',
     description: 'Customer-service horror stories.',
+  },
+  {
+    name: 'ActualPublicFreakouts',
+    difficulty: 'hard',
+    category: 'viral',
+    description: 'Less-moderated alternative to r/PublicFreakout.',
+  },
+  {
+    name: 'formuladank',
+    difficulty: 'hard',
+    category: 'motorsport',
+    description: 'Formula 1 memes and shitposting.',
   },
 ];

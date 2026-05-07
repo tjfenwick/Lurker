@@ -17,14 +17,18 @@ import {
   truncateComment,
 } from './scrub';
 
-const USER_AGENT = 'lurker/1.0 (Reddit subreddit-guessing game data fetcher)';
+const USER_AGENT = 'reddit-geoguesser/1.0 (by /u/anonymous)';
 const TARGET_PER_SUB = 25;
 const POSTS_PER_SUB_FETCH = 100;
 const MIN_PER_SUB_WARN = 15;
-const COMMENTS_PER_POST = 3;
+const COMMENTS_PER_POST = 5;
 const LISTING_SLEEP_MS = 2000;
 const COMMENTS_SLEEP_MS = 3000;
-const RATE_LIMIT_BACKOFF_MS = 60000;
+
+// Per-route 429 backoff schedule. Indexed by attempt number (1-based).
+// Reddit's per-route bucket usually clears within 90–180s.
+const BACKOFF_SCHEDULE_S = [90, 180, 270];
+const MAX_RETRY_ATTEMPTS = BACKOFF_SCHEDULE_S.length;
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = resolve(dirname(__filename), '..');
@@ -63,9 +67,20 @@ async function fetchJson(url: string, attempt = 1): Promise<unknown> {
     },
   });
   if (res.status === 429) {
-    if (attempt > 1) throw new Error(`Rate limited twice on ${url}, giving up.`);
-    console.warn(`  ! 429 from ${url} — sleeping ${RATE_LIMIT_BACKOFF_MS / 1000}s and retrying`);
-    await sleep(RATE_LIMIT_BACKOFF_MS);
+    if (attempt > MAX_RETRY_ATTEMPTS) {
+      throw new Error(`Rate limited ${MAX_RETRY_ATTEMPTS}+ times on ${url}, giving up.`);
+    }
+    // Honor Retry-After if Reddit sends it; cap at 5 minutes.
+    const retryAfterHeader = res.headers.get('retry-after');
+    const fromHeader = retryAfterHeader ? parseInt(retryAfterHeader, 10) : NaN;
+    const sleepSec =
+      !isNaN(fromHeader) && fromHeader > 0
+        ? Math.min(fromHeader, 300)
+        : (BACKOFF_SCHEDULE_S[attempt - 1] ?? 270);
+    process.stdout.write(
+      `\n  ! 429 — sleeping ${sleepSec}s (retry ${attempt}/${MAX_RETRY_ATTEMPTS})\n  `,
+    );
+    await sleep(sleepSec * 1000);
     return fetchJson(url, attempt + 1);
   }
   if (!res.ok) {
@@ -126,112 +141,185 @@ function buildPost(raw: RawRedditPost, scrubbedComments: Comment[]): Post {
   };
 }
 
-interface SubResult {
-  subreddit: string;
-  posts: Post[];
-  fetched: number;
+interface SubQueue {
+  name: string;
+  candidates: RawRedditPost[]; // already passed shouldRejectPost + scrub-acceptability
+  kept: Post[];
   rejectedRaw: number;
   rejectedScrub: number;
+  commentsFailed: number;
+  commentLimit: number;
 }
 
-async function processSubreddit(subreddit: string, postLimit: number | null): Promise<SubResult> {
-  console.log(`\n─── r/${subreddit} ───`);
-  let raw: RawRedditPost[];
-  try {
-    raw = await fetchTopPosts(subreddit);
-  } catch (err) {
-    console.warn(`  ! listing fetch failed: ${(err as Error).message}`);
-    return { subreddit, posts: [], fetched: 0, rejectedRaw: 0, rejectedScrub: 0 };
-  }
-  console.log(`  listing: ${raw.length} posts`);
+interface SummaryRow {
+  subreddit: string;
+  posts: Post[];
+  rejectedRaw: number;
+  rejectedScrub: number;
+  commentsFailed: number;
+}
 
-  const ranked: Array<{ post: RawRedditPost; score: number }> = raw
-    .map((p) => ({ post: p, score: p.score ?? 0 }))
-    .sort((a, b) => b.score - a.score);
-
-  const kept: Post[] = [];
-  let rejectedRaw = 0;
-  let rejectedScrub = 0;
-  let processed = 0;
-
-  for (const { post } of ranked) {
-    if (kept.length >= TARGET_PER_SUB) break;
-    if (postLimit != null && processed >= postLimit) break;
-    processed++;
-
-    if (shouldRejectPost(post)) {
-      rejectedRaw++;
-      continue;
-    }
-    const scrubbedTitle = scrubTitle(post.title, post.subreddit);
-    const scrubbedBody = scrubText(post.selftext ?? '', post.subreddit);
-    if (!isPostScrubbedTitleAcceptable(scrubbedTitle)) {
-      rejectedScrub++;
-      continue;
-    }
-    if (!isPostScrubbedBodyAcceptable(scrubbedBody)) {
-      rejectedScrub++;
-      continue;
-    }
-
-    let rawComments: RawRedditComment[] = [];
+async function gatherListings(
+  subs: { name: string }[],
+  postLimit: number | null,
+): Promise<SubQueue[]> {
+  console.log(`\n━━━ Phase 1: listings (${subs.length} subs) ━━━`);
+  const queues: SubQueue[] = [];
+  for (let i = 0; i < subs.length; i++) {
+    const sub = subs[i]!;
+    process.stdout.write(`[${i + 1}/${subs.length}] r/${sub.name}  `);
+    let raw: RawRedditPost[];
     try {
-      rawComments = await fetchTopLevelComments(post.subreddit, post.id);
+      raw = await fetchTopPosts(sub.name);
     } catch (err) {
-      console.warn(`  ! comments for ${post.id} failed: ${(err as Error).message}`);
+      console.warn(`! listing failed: ${(err as Error).message}`);
+      queues.push({
+        name: sub.name,
+        candidates: [],
+        kept: [],
+        rejectedRaw: 0,
+        rejectedScrub: 0,
+        commentsFailed: 0,
+        commentLimit: postLimit ?? TARGET_PER_SUB,
+      });
+      continue;
     }
-    await sleep(COMMENTS_SLEEP_MS);
 
-    const surviving = rawComments
-      .filter((c) => !shouldRejectComment(c))
-      .map((c): Comment => {
-        const scrubbed = scrubComment(c.body, post.subreddit);
-        return {
-          id: c.id,
-          body: truncateComment(scrubbed),
-          score: c.score ?? 0,
-        };
-      })
-      .filter((c) => c.body.length >= 20)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, COMMENTS_PER_POST);
+    const ranked = raw
+      .map((p) => ({ post: p, score: p.score ?? 0 }))
+      .sort((a, b) => b.score - a.score);
 
-    kept.push(buildPost(post, surviving));
-    process.stdout.write(`.`);
+    let rejectedRaw = 0;
+    let rejectedScrub = 0;
+    const candidates: RawRedditPost[] = [];
+    const cap = postLimit ?? TARGET_PER_SUB;
+    for (const { post } of ranked) {
+      if (candidates.length >= cap) break;
+      if (shouldRejectPost(post)) {
+        rejectedRaw++;
+        continue;
+      }
+      const t = scrubTitle(post.title, post.subreddit);
+      const b = scrubText(post.selftext ?? '', post.subreddit);
+      if (!isPostScrubbedTitleAcceptable(t)) {
+        rejectedScrub++;
+        continue;
+      }
+      if (!isPostScrubbedBodyAcceptable(b)) {
+        rejectedScrub++;
+        continue;
+      }
+      candidates.push(post);
+    }
+    console.log(`fetched ${raw.length}, candidates ${candidates.length} (raw=${rejectedRaw} scrub=${rejectedScrub})`);
+
+    queues.push({
+      name: sub.name,
+      candidates,
+      kept: [],
+      rejectedRaw,
+      rejectedScrub,
+      commentsFailed: 0,
+      commentLimit: cap,
+    });
+
+    if (i < subs.length - 1) {
+      await sleep(LISTING_SLEEP_MS);
+    }
   }
-  process.stdout.write(`\n`);
-  console.log(
-    `  kept ${kept.length}/${TARGET_PER_SUB}  rejected:raw=${rejectedRaw}  rejected:scrub=${rejectedScrub}`,
-  );
-
-  if (kept.length < MIN_PER_SUB_WARN) {
-    console.warn(`  ⚠ low yield for r/${subreddit}: only ${kept.length} posts`);
-  }
-  return {
-    subreddit,
-    posts: kept,
-    fetched: raw.length,
-    rejectedRaw,
-    rejectedScrub,
-  };
+  return queues;
 }
 
-function summarize(results: SubResult[]): void {
+async function harvestCommentsRoundRobin(queues: SubQueue[]): Promise<void> {
+  const totalCandidates = queues.reduce((sum, q) => sum + Math.min(q.candidates.length, q.commentLimit), 0);
+  console.log(`\n━━━ Phase 2: comment fetches — round-robin (${totalCandidates} posts) ━━━`);
+  if (totalCandidates === 0) return;
+
+  let tick = 0;
+  while (true) {
+    tick++;
+    const tickLabel = String(tick).padStart(2, '0');
+    process.stdout.write(`tick ${tickLabel}  `);
+    let processedThisTick = 0;
+
+    for (const q of queues) {
+      if (q.kept.length >= q.commentLimit) continue;
+      if (q.candidates.length === 0) continue;
+
+      const post = q.candidates.shift()!;
+      let rawComments: RawRedditComment[] = [];
+      let mark = '.';
+      try {
+        rawComments = await fetchTopLevelComments(post.subreddit, post.id);
+      } catch (err) {
+        q.commentsFailed++;
+        mark = 'x';
+        // Keep on its own line so the tick row stays readable
+        process.stdout.write(`\n  ! r/${post.subreddit} ${post.id}: ${(err as Error).message}\n  `);
+      }
+
+      const surviving = rawComments
+        .filter((c) => !shouldRejectComment(c))
+        .map((c): Comment => {
+          const scrubbed = scrubComment(c.body, post.subreddit);
+          return {
+            id: c.id,
+            body: truncateComment(scrubbed),
+            score: c.score ?? 0,
+          };
+        })
+        .filter((c) => c.body.length >= 20)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, COMMENTS_PER_POST);
+
+      q.kept.push(buildPost(post, surviving));
+      process.stdout.write(mark);
+      processedThisTick++;
+
+      await sleep(COMMENTS_SLEEP_MS);
+    }
+
+    process.stdout.write(`  (${processedThisTick} posts)\n`);
+    if (processedThisTick === 0) break;
+  }
+}
+
+function summarize(rows: SummaryRow[]): void {
   console.log('\n━━━ Summary ━━━');
-  console.log('subreddit'.padEnd(28) + 'kept'.padEnd(8) + 'avg comments');
-  console.log('─'.repeat(50));
+  console.log(
+    'subreddit'.padEnd(28) +
+      'kept'.padEnd(7) +
+      'avg cmt'.padEnd(9) +
+      'cmt-fail'.padEnd(10) +
+      'rejected',
+  );
+  console.log('─'.repeat(70));
   let totalPosts = 0;
   let totalComments = 0;
-  for (const r of results) {
+  let totalCommentFails = 0;
+  for (const r of rows) {
     const cmtTotal = r.posts.reduce((sum, p) => sum + p.comments.length, 0);
     const avg = r.posts.length === 0 ? '0.00' : (cmtTotal / r.posts.length).toFixed(2);
-    console.log(`r/${r.subreddit}`.padEnd(28) + String(r.posts.length).padEnd(8) + avg);
+    const rej = `raw=${r.rejectedRaw} scrub=${r.rejectedScrub}`;
+    console.log(
+      `r/${r.subreddit}`.padEnd(28) +
+        String(r.posts.length).padEnd(7) +
+        avg.padEnd(9) +
+        String(r.commentsFailed).padEnd(10) +
+        rej,
+    );
     totalPosts += r.posts.length;
     totalComments += cmtTotal;
+    totalCommentFails += r.commentsFailed;
   }
-  console.log('─'.repeat(50));
+  console.log('─'.repeat(70));
   const avgAll = totalPosts === 0 ? '0.00' : (totalComments / totalPosts).toFixed(2);
-  console.log(`TOTAL`.padEnd(28) + String(totalPosts).padEnd(8) + avgAll);
+  console.log(
+    `TOTAL`.padEnd(28) +
+      String(totalPosts).padEnd(7) +
+      avgAll.padEnd(9) +
+      String(totalCommentFails).padEnd(10),
+  );
 }
 
 async function main(): Promise<void> {
@@ -241,18 +329,24 @@ async function main(): Promise<void> {
   console.log(`Fetching ${subs.length} subreddit(s)`);
   if (args.limitPosts != null) console.log(`(--limit-posts ${args.limitPosts} per sub)`);
 
-  const results: SubResult[] = [];
-  for (let i = 0; i < subs.length; i++) {
-    const sub = subs[i]!;
-    console.log(`\n[${i + 1}/${subs.length}]`);
-    const result = await processSubreddit(sub.name, args.limitPosts);
-    results.push(result);
-    if (i < subs.length - 1) {
-      await sleep(LISTING_SLEEP_MS);
+  const queues = await gatherListings(subs, args.limitPosts);
+  await harvestCommentsRoundRobin(queues);
+
+  const rows: SummaryRow[] = queues.map((q) => ({
+    subreddit: q.name,
+    posts: q.kept,
+    rejectedRaw: q.rejectedRaw,
+    rejectedScrub: q.rejectedScrub,
+    commentsFailed: q.commentsFailed,
+  }));
+
+  for (const r of rows) {
+    if (r.posts.length < MIN_PER_SUB_WARN && (args.limitPosts ?? TARGET_PER_SUB) >= MIN_PER_SUB_WARN) {
+      console.warn(`  ⚠ low yield for r/${r.subreddit}: only ${r.posts.length} posts`);
     }
   }
 
-  const allPosts = results.flatMap((r) => r.posts);
+  const allPosts = rows.flatMap((r) => r.posts);
   const file: PostsFile = {
     generatedAt: new Date().toISOString(),
     count: allPosts.length,
@@ -263,7 +357,7 @@ async function main(): Promise<void> {
   await writeFile(OUT_PATH, JSON.stringify(file, null, 2), 'utf8');
   console.log(`\nWrote ${OUT_PATH} (${allPosts.length} posts)`);
 
-  summarize(results);
+  summarize(rows);
 }
 
 main().catch((err) => {
